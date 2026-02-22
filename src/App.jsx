@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
-// 실제 운영 환경에서는 npm install @supabase/supabase-js 후 아래와 같이 import 하셔도 됩니다.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { 
   Plus, Clock, CheckCircle2, ShieldCheck, MapPin, Package, EyeOff, User, 
   Truck, ArrowLeft, ChevronRight, AlertCircle, LogOut, Lock, Loader2, ClipboardList, Minus,
-  Users, KeyRound, Phone, Search, Trash2, Camera
+  Users, KeyRound, Search, Trash2, Camera
 } from 'lucide-react';
 
 // ==========================================
-// 1. Supabase 클라이언트 초기화 (최종 연동)
+// 1. Supabase 클라이언트 초기화
 // ==========================================
 const supabaseUrl = 'https://zvwxvutmcnvqgnfhuifv.supabase.co'; 
 const supabaseKey = 'sb_publishable_ndM9CTO8kx1sSmdm_PSk0g_Uup0IYac'; 
@@ -28,31 +27,27 @@ const formatPhoneNumber = (value) => {
 
 const App = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [role, setRole] = useState(null); // 'customer' | 'partner' | 'admin'
+  const [role, setRole] = useState(null); 
   const [view, setView] = useState('home');
   const [selectedReqId, setSelectedReqId] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // 로그인한 사용자 정보 보관
   const [currentUser, setCurrentUser] = useState(null); 
   const [currentPartner, setCurrentPartner] = useState(null); 
 
-  // 관리자 접속용
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminCode, setAdminCode] = useState('');
   const ADMIN_SECRET_ENCODED = "MjRnbyQk"; 
 
-  // 파트너 & 관리자 탭 상태
   const [partnerTab, setPartnerTab] = useState('new'); 
   const [adminTab, setAdminTab] = useState('orders'); 
 
-  // DB 상태
   const [requests, setRequests] = useState([]);
   const [partners, setPartners] = useState([]);
   const selectedReq = requests.find(r => r.id === selectedReqId);
 
   // ==========================================
-  // 2. [READ] 데이터 불러오기
+  // 2. 데이터 불러오기
   // ==========================================
   const fetchRequests = async () => {
     setIsLoading(true);
@@ -116,41 +111,69 @@ const App = () => {
     } catch (e) { alert("오류 발생"); setAdminCode(''); }
   };
 
-  // --- 전역 액션 핸들러 (낙찰, 마감, 삭제) ---
+  // ==========================================
+  // [강력해진] 전역 상태 변경 액션 핸들러 (낙찰, 강제마감, 삭제)
+  // ==========================================
   const handleAcceptBid = async (reqId, partnerCode, partnerName, price) => {
-    if(!window.confirm(`[${partnerName}] 업체의 견적(${price.toLocaleString()}원)으로 낙찰하시겠습니까?\n낙찰 후에는 번복할 수 없으며, 고객님의 연락처가 해당 업체에 공개됩니다.`)) return;
+    if(!window.confirm(`[${partnerName}] 업체의 견적(${price.toLocaleString()}원)으로 최종 낙찰하시겠습니까?\n\n낙찰 시 이 업체의 사장님에게 고객님의 연락처와 상세 주소가 공개됩니다.`)) return;
+    
     try {
-        const { error } = await supabase.from('requests')
+        // 즉각적인 UI 반응을 위한 옵티미스틱 업데이트
+        setRequests(prev => prev.map(r => r.id === reqId ? { ...r, status: 'awarded', winner_code: partnerCode } : r));
+
+        const { data, error } = await supabase.from('requests')
             .update({ status: 'awarded', winner_code: partnerCode })
-            .eq('id', reqId);
+            .eq('id', reqId)
+            .select(); // DB가 실제로 업데이트했는지 확인하기 위해 데이터를 다시 받아옴
+
         if(error) throw error;
-        alert("낙찰이 완료되었습니다! 업체에서 곧 연락을 드릴 예정입니다.");
-        fetchRequests();
+        
+        if(!data || data.length === 0) {
+            throw new Error("데이터베이스 업데이트가 거절되었습니다.\nSupabase에서 requests 테이블의 RLS 권한을 해제(Disable RLS) 해주세요!");
+        }
+
+        alert("🎉 성공적으로 낙찰이 완료되었습니다!\n업체에서 곧 연락을 드릴 예정입니다.");
+        await fetchRequests(); // 완벽한 동기화를 위해 재호출
     } catch(error) {
-        alert("낙찰 처리 중 오류 발생: " + error.message + "\n(Supabase에 winner_code 컬럼이 있는지 확인해주세요)");
+        alert("낙찰 처리 실패: " + error.message);
+        await fetchRequests(); // 에러 시 원래 상태로 복구
     }
   };
 
   const handleForceClose = async (reqId) => {
     if(!window.confirm("정말 이 견적을 강제 마감하시겠습니까?")) return;
     try {
-      const { error } = await supabase.from('requests').update({ status: 'closed' }).eq('id', reqId);
+      setRequests(prev => prev.map(r => r.id === reqId ? { ...r, status: 'closed' } : r));
+      
+      const { data, error } = await supabase.from('requests').update({ status: 'closed' }).eq('id', reqId).select();
       if(error) throw error;
+      
+      if(!data || data.length === 0) {
+          throw new Error("권한 에러: Supabase에서 requests 테이블의 RLS를 Disable 해주세요.");
+      }
+
       alert("입찰 마감 처리 완료!");
-      fetchRequests();
       if(view === 'detail') setView('home');
-    } catch (error) { alert("오류 발생: " + error.message); }
+    } catch (error) { 
+        alert("마감 실패: " + error.message); 
+        fetchRequests();
+    }
   };
 
   const handleDeleteOrder = async (reqId) => {
       if(!window.confirm("이 오더를 완전히 삭제하시겠습니까?\n삭제 후에는 다시 복구할 수 없습니다.")) return;
       try {
+          setRequests(prev => prev.filter(r => r.id !== reqId));
+          
           const { error } = await supabase.from('requests').delete().eq('id', reqId);
           if(error) throw error;
-          alert("성공적으로 삭제되었습니다.");
-          fetchRequests();
+
+          alert("성공적으로 영구 삭제되었습니다.");
           if(view === 'detail') setView('home');
-      } catch (error) { alert("삭제 중 오류 발생: " + error.message); }
+      } catch (error) { 
+          alert("삭제 중 오류 발생: " + error.message); 
+          fetchRequests();
+      }
   };
 
 
@@ -306,7 +329,7 @@ const App = () => {
             if (error || !data) {
                 alert('등록되지 않은 파트너 코드입니다.\n관리자에게 문의해주세요.');
             } else {
-                setCurrentPartner({ code: data.partner_code, name: data.partner_name });
+                setCurrentPartner({ code: data.partner_code, name: data.partner_name || data.name }); // 컬럼명 호환성 보장
                 setRole('partner');
                 setIsLoggedIn(true);
             }
@@ -328,7 +351,6 @@ const App = () => {
         
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="max-w-6xl w-full grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
-            {/* Left: Hero Section */}
             <div className="space-y-8 hidden md:block">
               <div className="inline-flex items-center space-x-2 bg-blue-100 text-blue-700 px-4 py-2 rounded-full text-sm font-bold">
                 <span className="relative flex h-3 w-3">
@@ -345,7 +367,6 @@ const App = () => {
               </p>
             </div>
 
-            {/* Right: Login Options & Auth Forms */}
             <div className="bg-white p-8 sm:p-10 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100">
               
               {authStep === 'main' && (
@@ -397,7 +418,6 @@ const App = () => {
                 </div>
               )}
 
-              {/* 고객 로그인 폼 */}
               {authStep === 'customer' && (
                 <div className="space-y-6 animate-in slide-in-from-right-8 duration-300">
                     <button onClick={() => setAuthStep('main')} className="flex items-center text-sm font-bold text-slate-500 hover:text-slate-900 mb-6 transition-colors">
@@ -424,7 +444,6 @@ const App = () => {
                 </div>
               )}
 
-              {/* 파트너 로그인 폼 */}
               {authStep === 'partner' && (
                 <div className="space-y-6 animate-in slide-in-from-right-8 duration-300">
                     <button onClick={() => setAuthStep('main')} className="flex items-center text-sm font-bold text-slate-500 hover:text-slate-900 mb-6 transition-colors">
@@ -449,7 +468,6 @@ const App = () => {
                     </div>
                 </div>
               )}
-
             </div>
           </div>
         </div>
@@ -555,7 +573,7 @@ const App = () => {
                                         <td className="p-4 text-slate-600">{p.phone}</td>
                                         <td className="p-4 text-sm text-slate-400">{new Date(p.created_at).toLocaleDateString()}</td>
                                         <td className="p-4 text-center">
-                                            <button onClick={() => handleDeletePartner(p.partner_code, p.partner_name)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors inline-flex items-center text-xs font-bold">
+                                            <button onClick={() => handleDeletePartner(p.partner_code, p.name || p.partner_name)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors inline-flex items-center text-xs font-bold">
                                                 <Trash2 className="w-4 h-4 mr-1"/> 삭제
                                             </button>
                                         </td>
@@ -582,7 +600,6 @@ const App = () => {
       agreeTerms1: false, agreeTerms2: false, mediaFiles: []
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
-
     const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
     const [addressType, setAddressType] = useState(null);
 
@@ -635,21 +652,14 @@ const App = () => {
     const updateItemCount = (item, delta) => setFormData(prev => ({ ...prev, items: { ...prev.items, [item]: Math.max(0, prev.items[item] + delta) } }));
 
     const handleSubmit = async () => {
-      if(!formData.fromRegion || !formData.toRegion || !formData.date) {
-        return alert("필수 정보를 모두 입력해주세요.");
-      }
-      if(!formData.agreeTerms1 || !formData.agreeTerms2) {
-        return alert("필수 약관에 동의하셔야 합니다.");
-      }
+      if(!formData.fromRegion || !formData.toRegion || !formData.date) return alert("필수 정보를 모두 입력해주세요.");
+      if(!formData.agreeTerms1 || !formData.agreeTerms2) return alert("필수 약관에 동의하셔야 합니다.");
 
       setIsSubmitting(true);
-      
       const fullFromAddress = `${formData.fromRegion} ${formData.fromDetail}`.trim();
       const fullToAddress = `${formData.toRegion} ${formData.toDetail}`.trim();
-      
-      // 파일명 추출하여 기타사항에 텍스트로 합침 (실제 Storage 연동 전 에러 방지용)
       const fileNames = formData.mediaFiles.length > 0 ? formData.mediaFiles.map(f => f.name).join(', ') : '';
-      const finalExtraItems = fileNames ? `${formData.extraItems}\n\n[첨부된 파일: ${fileNames}]` : formData.extraItems;
+      const finalExtraItems = fileNames ? `${formData.extraItems}\n\n[첨부된 사진/영상 파일: ${fileNames}]` : formData.extraItems;
 
       try {
         const { error } = await supabase.from('requests').insert([{
@@ -663,19 +673,19 @@ const App = () => {
           items: formData.items,
           extra_items: finalExtraItems,
           has_elevator_from: formData.hasElevatorFrom,
-          has_ladder_from: formData.hasLadderFrom, // Supabase에 컬럼 필요
+          has_ladder_from: formData.hasLadderFrom,
           has_elevator_to: formData.hasElevatorTo,
-          has_ladder_to: formData.hasLadderTo, // Supabase에 컬럼 필요
+          has_ladder_to: formData.hasLadderTo,
           status: 'bidding'
         }]);
 
         if (error) throw error;
         
-        alert("이사 요청이 성공적으로 등록되었습니다!");
+        alert("이사 견적 요청이 성공적으로 등록되었습니다!");
         await fetchRequests();
         setView('home');
       } catch (error) {
-        alert("등록 중 오류가 발생했습니다: " + error.message + "\n(Supabase에 has_ladder_from, has_ladder_to 컬럼이 추가되었는지 확인해주세요!)");
+        alert("등록 중 오류가 발생했습니다: " + error.message);
       } finally {
         setIsSubmitting(false);
       }
@@ -810,7 +820,7 @@ const App = () => {
                     <textarea placeholder="피아노, 안마의자 등 특수 화물이 있거나 기타 요청사항을 상세히 적어주세요." className="w-full p-5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white h-32 resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none leading-relaxed" onChange={e => setFormData({...formData, extraItems: e.target.value})} />
                 </div>
 
-                {/* 파일 업로드 폼 추가 */}
+                {/* 첨부 파일 폼 */}
                 <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
                     <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center">
                         <Camera className="w-4 h-4 mr-1.5 text-slate-500"/> 현장 사진/영상 첨부 (선택)
@@ -849,6 +859,7 @@ const App = () => {
           </div>
         </div>
 
+        {/* 팝업 모달 */}
         {isAddressModalOpen && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6" style={{ backgroundColor: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }}>
                 <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col h-[70vh] sm:h-[80vh] animate-in zoom-in-95 duration-200 border border-gray-100">
@@ -872,10 +883,7 @@ const App = () => {
   const DetailView = () => {
     if (!selectedReq) return null;
 
-    // 파트너 본인이 낙찰받은 오더인지 판별
     const isPartnerWinner = role === 'partner' && selectedReq.status === 'awarded' && selectedReq.winner_code === currentPartner?.code;
-
-    // 상세 주소 블라인드 로직 (고객/관리자이거나, 낙찰받은 파트너면 블라인드 해제)
     const canSeeFullAddress = role === 'admin' || role === 'customer' || isPartnerWinner;
     const renderFromAddress = canSeeFullAddress ? selectedReq.from_address : selectedReq.from_address.split(' ').slice(0, 2).join(' ') + ' OOO';
     const renderToAddress = canSeeFullAddress ? selectedReq.to_address : selectedReq.to_address.split(' ').slice(0, 2).join(' ') + ' OOO';
@@ -903,7 +911,7 @@ const App = () => {
                         <ClipboardList className="w-5 h-5 mr-2 text-blue-600"/> 이사 상세 정보
                     </h3>
                     
-                    {/* 정보 공개 영역 (관리자, 고객 본인, 혹은 낙찰받은 파트너) */}
+                    {/* 낙찰 시 정보 공개 영역 */}
                     {canSeeFullAddress && (
                         <div className={`${role === 'admin' ? 'bg-red-50 border-red-100' : isPartnerWinner ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-100'} p-5 rounded-2xl border mb-8 animate-in fade-in zoom-in-95`}>
                             {isPartnerWinner ? (
@@ -1055,7 +1063,7 @@ const App = () => {
                                         </div>
                                     </div>
                                     
-                                    {/* 고객 권한: 입찰 중일 때 낙찰하기 버튼 표시 */}
+                                    {/* 낙찰 버튼 */}
                                     {role === 'customer' && selectedReq.status === 'bidding' && (
                                         <button onClick={() => handleAcceptBid(selectedReq.id, bid.partner_code, bid.partner_name, bid.price)} className="mt-6 w-full bg-blue-600 text-white text-lg font-bold py-4 rounded-xl hover:bg-blue-700 transition-colors shadow-sm">
                                             이 업체로 낙찰하기
@@ -1250,7 +1258,6 @@ const App = () => {
 
   if (!isLoggedIn) return <LoginScreen />;
 
-  // 사용자 권한별로 보여줄 리스트 필터링 로직
   const getFilteredRequests = () => {
     if (role === 'customer') {
         return requests.filter(r => r.customer_name === currentUser.name && r.phone === currentUser.phone);
