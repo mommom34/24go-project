@@ -4,7 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { 
   Plus, Clock, CheckCircle2, ShieldCheck, MapPin, Package, EyeOff, User, 
   Truck, ArrowLeft, ChevronRight, AlertCircle, LogOut, Lock, Loader2, ClipboardList, Minus,
-  Users, KeyRound, Phone, Search, Trash2
+  Users, KeyRound, Phone, Search, Trash2, Camera
 } from 'lucide-react';
 
 // ==========================================
@@ -34,18 +34,17 @@ const App = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   // 로그인한 사용자 정보 보관
-  const [currentUser, setCurrentUser] = useState(null); // { name, phone }
-  const [currentPartner, setCurrentPartner] = useState(null); // { code, name }
+  const [currentUser, setCurrentUser] = useState(null); 
+  const [currentPartner, setCurrentPartner] = useState(null); 
 
   // 관리자 접속용
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminCode, setAdminCode] = useState('');
-  const ADMIN_SECRET_ENCODED = "MjRnbyQk"; // '24go$$' Base64
+  const ADMIN_SECRET_ENCODED = "MjRnbyQk"; 
 
-  // 파트너 탭 상태
-  const [partnerTab, setPartnerTab] = useState('new'); // 'new' | 'mybids'
-  // 관리자 탭 상태
-  const [adminTab, setAdminTab] = useState('orders'); // 'orders' | 'partners'
+  // 파트너 & 관리자 탭 상태
+  const [partnerTab, setPartnerTab] = useState('new'); 
+  const [adminTab, setAdminTab] = useState('orders'); 
 
   // DB 상태
   const [requests, setRequests] = useState([]);
@@ -53,7 +52,7 @@ const App = () => {
   const selectedReq = requests.find(r => r.id === selectedReqId);
 
   // ==========================================
-  // 2. [READ] 데이터 불러오기 (Select)
+  // 2. [READ] 데이터 불러오기
   // ==========================================
   const fetchRequests = async () => {
     setIsLoading(true);
@@ -89,9 +88,7 @@ const App = () => {
   useEffect(() => {
     if (isLoggedIn) {
       fetchRequests();
-      if (role === 'admin') {
-        fetchPartners();
-      }
+      if (role === 'admin') fetchPartners();
     }
   }, [isLoggedIn, role]);
 
@@ -119,7 +116,45 @@ const App = () => {
     } catch (e) { alert("오류 발생"); setAdminCode(''); }
   };
 
-  // --- 공통: Header (네비게이션 바 & 뒤로가기) ---
+  // --- 전역 액션 핸들러 (낙찰, 마감, 삭제) ---
+  const handleAcceptBid = async (reqId, partnerCode, partnerName, price) => {
+    if(!window.confirm(`[${partnerName}] 업체의 견적(${price.toLocaleString()}원)으로 낙찰하시겠습니까?\n낙찰 후에는 번복할 수 없으며, 고객님의 연락처가 해당 업체에 공개됩니다.`)) return;
+    try {
+        const { error } = await supabase.from('requests')
+            .update({ status: 'awarded', winner_code: partnerCode })
+            .eq('id', reqId);
+        if(error) throw error;
+        alert("낙찰이 완료되었습니다! 업체에서 곧 연락을 드릴 예정입니다.");
+        fetchRequests();
+    } catch(error) {
+        alert("낙찰 처리 중 오류 발생: " + error.message + "\n(Supabase에 winner_code 컬럼이 있는지 확인해주세요)");
+    }
+  };
+
+  const handleForceClose = async (reqId) => {
+    if(!window.confirm("정말 이 견적을 강제 마감하시겠습니까?")) return;
+    try {
+      const { error } = await supabase.from('requests').update({ status: 'closed' }).eq('id', reqId);
+      if(error) throw error;
+      alert("입찰 마감 처리 완료!");
+      fetchRequests();
+      if(view === 'detail') setView('home');
+    } catch (error) { alert("오류 발생: " + error.message); }
+  };
+
+  const handleDeleteOrder = async (reqId) => {
+      if(!window.confirm("이 오더를 완전히 삭제하시겠습니까?\n삭제 후에는 다시 복구할 수 없습니다.")) return;
+      try {
+          const { error } = await supabase.from('requests').delete().eq('id', reqId);
+          if(error) throw error;
+          alert("성공적으로 삭제되었습니다.");
+          fetchRequests();
+          if(view === 'detail') setView('home');
+      } catch (error) { alert("삭제 중 오류 발생: " + error.message); }
+  };
+
+
+  // --- 공통: Header ---
   const Header = () => (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -161,13 +196,15 @@ const App = () => {
         <div>
             {req.status === 'bidding' ? (
             <span className="inline-flex items-center bg-blue-50 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-lg mb-2">
-                <span className="w-2 h-2 rounded-full bg-blue-500 mr-2 animate-pulse"></span>
-                입찰 진행 중
+                <span className="w-2 h-2 rounded-full bg-blue-500 mr-2 animate-pulse"></span>입찰 진행 중
+            </span>
+            ) : req.status === 'awarded' ? (
+            <span className="inline-flex items-center bg-pink-100 text-pink-700 text-xs font-bold px-3 py-1.5 rounded-lg mb-2">
+                <CheckCircle2 className="w-3.5 h-3.5 mr-1.5"/>낙찰 완료
             </span>
             ) : (
             <span className="inline-flex items-center bg-gray-100 text-gray-600 text-xs font-bold px-3 py-1.5 rounded-lg mb-2">
-                <CheckCircle2 className="w-3.5 h-3.5 mr-1.5"/>
-                입찰 마감
+                <CheckCircle2 className="w-3.5 h-3.5 mr-1.5"/>입찰 마감
             </span>
             )}
             <div className="text-sm font-medium text-slate-500 flex items-center mt-1">
@@ -220,12 +257,28 @@ const App = () => {
                 </span>
             )}
             {viewer === 'admin' && (
-                <span className="text-red-500 font-bold px-2 py-1 text-sm">
-                    총 {req.bids?.length || 0}건
-                </span>
+                <span className="text-red-500 font-bold px-2 py-1 text-sm">총 {req.bids?.length || 0}건</span>
             )}
         </div>
       </div>
+
+      {/* 관리자: 카드 내에서 직접 마감/삭제 (권한 통제 강화) */}
+      {viewer === 'admin' && (
+          <div className="flex gap-2 mt-4 pt-4 border-t border-gray-100" onClick={(e) => e.stopPropagation()}>
+              {req.status === 'bidding' ? (
+                  <button onClick={() => handleForceClose(req.id)} className="flex-1 bg-orange-50 text-orange-600 py-2 rounded-lg text-sm font-bold hover:bg-orange-100 transition-colors flex items-center justify-center">
+                      <Lock className="w-3.5 h-3.5 mr-1" /> 강제마감
+                  </button>
+              ) : (
+                  <div className="flex-1 bg-gray-50 text-gray-400 py-2 rounded-lg text-sm font-bold flex items-center justify-center cursor-not-allowed">
+                      <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> 마감됨
+                  </div>
+              )}
+              <button onClick={() => handleDeleteOrder(req.id)} className="flex-1 bg-red-50 text-red-600 py-2 rounded-lg text-sm font-bold hover:bg-red-100 transition-colors flex items-center justify-center">
+                  <Trash2 className="w-3.5 h-3.5 mr-1" /> 삭제
+              </button>
+          </div>
+      )}
     </div>
   );
 
@@ -249,7 +302,7 @@ const App = () => {
         
         setIsLoggingIn(true);
         try {
-           const { data, error } = await supabase.from('partners').select('*').eq('partner_code', loginCode).single();
+            const { data, error } = await supabase.from('partners').select('*').eq('partner_code', loginCode).single();
             if (error || !data) {
                 alert('등록되지 않은 파트너 코드입니다.\n관리자에게 문의해주세요.');
             } else {
@@ -420,8 +473,9 @@ const App = () => {
             
             const { error } = await supabase.from('partners').insert([{
                 partner_code: newCode,
-                partner_name: newName
-                }]);
+                partner_name: newName,
+                phone: newPhone
+            }]);
 
             if(error) throw error;
 
@@ -497,11 +551,11 @@ const App = () => {
                                         <td className="p-4">
                                             <span className="bg-blue-100 text-blue-700 font-mono font-bold px-3 py-1.5 rounded-lg border border-blue-200">{p.partner_code}</span>
                                         </td>
-                                        <td className="p-4 font-bold text-slate-800">{p.name}</td>
+                                        <td className="p-4 font-bold text-slate-800">{p.name || p.partner_name}</td>
                                         <td className="p-4 text-slate-600">{p.phone}</td>
                                         <td className="p-4 text-sm text-slate-400">{new Date(p.created_at).toLocaleDateString()}</td>
                                         <td className="p-4 text-center">
-                                            <button onClick={() => handleDeletePartner(p.code, p.name)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors inline-flex items-center text-xs font-bold">
+                                            <button onClick={() => handleDeletePartner(p.partner_code, p.partner_name)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors inline-flex items-center text-xs font-bold">
                                                 <Trash2 className="w-4 h-4 mr-1"/> 삭제
                                             </button>
                                         </td>
@@ -524,7 +578,8 @@ const App = () => {
     const [formData, setFormData] = useState({
       fromRegion: '', fromDetail: '', toRegion: '', toDetail: '', date: '', time: timeOptions[0], rooms: 1, 
       items: itemOptions.reduce((acc, curr) => ({ ...acc, [curr]: 0 }), {}),
-      extraItems: '', hasElevatorFrom: true, hasElevatorTo: true, agreeTerms1: false, agreeTerms2: false
+      extraItems: '', hasElevatorFrom: false, hasLadderFrom: false, hasElevatorTo: false, hasLadderTo: false, 
+      agreeTerms1: false, agreeTerms2: false, mediaFiles: []
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -592,6 +647,10 @@ const App = () => {
       const fullFromAddress = `${formData.fromRegion} ${formData.fromDetail}`.trim();
       const fullToAddress = `${formData.toRegion} ${formData.toDetail}`.trim();
       
+      // 파일명 추출하여 기타사항에 텍스트로 합침 (실제 Storage 연동 전 에러 방지용)
+      const fileNames = formData.mediaFiles.length > 0 ? formData.mediaFiles.map(f => f.name).join(', ') : '';
+      const finalExtraItems = fileNames ? `${formData.extraItems}\n\n[첨부된 파일: ${fileNames}]` : formData.extraItems;
+
       try {
         const { error } = await supabase.from('requests').insert([{
           customer_name: currentUser.name,
@@ -602,9 +661,11 @@ const App = () => {
           move_time: formData.time,
           rooms: formData.rooms,
           items: formData.items,
-          extra_items: formData.extraItems,
+          extra_items: finalExtraItems,
           has_elevator_from: formData.hasElevatorFrom,
+          has_ladder_from: formData.hasLadderFrom, // Supabase에 컬럼 필요
           has_elevator_to: formData.hasElevatorTo,
+          has_ladder_to: formData.hasLadderTo, // Supabase에 컬럼 필요
           status: 'bidding'
         }]);
 
@@ -614,7 +675,7 @@ const App = () => {
         await fetchRequests();
         setView('home');
       } catch (error) {
-        alert("등록 중 오류가 발생했습니다: " + error.message);
+        alert("등록 중 오류가 발생했습니다: " + error.message + "\n(Supabase에 has_ladder_from, has_ladder_to 컬럼이 추가되었는지 확인해주세요!)");
       } finally {
         setIsSubmitting(false);
       }
@@ -665,11 +726,19 @@ const App = () => {
                             <button onClick={() => handleSearchAddress('from')} className="bg-slate-800 hover:bg-slate-900 text-white px-5 rounded-xl font-bold transition-colors whitespace-nowrap shadow-sm">주소 검색</button>
                         </div>
                         <input type="text" placeholder="상세 주소 (동/호수 등)" value={formData.fromDetail} onChange={e => setFormData({...formData, fromDetail: e.target.value})} className="w-full p-4 rounded-xl border border-gray-200 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none" />
-                        <label className="flex items-center mt-4 cursor-pointer group w-fit">
-                            <input type="checkbox" checked={formData.hasElevatorFrom} onChange={e => setFormData({...formData, hasElevatorFrom: e.target.checked})} className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer" />
-                            <span className="ml-3 text-sm text-slate-600 group-hover:text-slate-900 font-bold">출발지에 엘리베이터가 있습니다</span>
-                        </label>
+                        
+                        <div className="mt-4 flex flex-col space-y-2">
+                            <label className="flex items-center cursor-pointer group w-fit">
+                                <input type="checkbox" checked={formData.hasElevatorFrom} onChange={e => setFormData({...formData, hasElevatorFrom: e.target.checked})} className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer" />
+                                <span className="ml-3 text-sm text-slate-600 group-hover:text-slate-900 font-bold">엘리베이터 사용 가능</span>
+                            </label>
+                            <label className="flex items-center cursor-pointer group w-fit">
+                                <input type="checkbox" checked={formData.hasLadderFrom} onChange={e => setFormData({...formData, hasLadderFrom: e.target.checked})} className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer" />
+                                <span className="ml-3 text-sm text-slate-600 group-hover:text-slate-900 font-bold">사다리차 사용 가능</span>
+                            </label>
+                        </div>
                     </div>
+                    
                     <div className="bg-gray-50/50 p-5 rounded-2xl border border-gray-100">
                         <label className="block text-sm font-bold text-slate-700 mb-2">도착지 <span className="text-red-500">*</span></label>
                         <div className="flex space-x-2 mb-2">
@@ -677,10 +746,17 @@ const App = () => {
                             <button onClick={() => handleSearchAddress('to')} className="bg-slate-800 hover:bg-slate-900 text-white px-5 rounded-xl font-bold transition-colors whitespace-nowrap shadow-sm">주소 검색</button>
                         </div>
                         <input type="text" placeholder="상세 주소 (동/호수 등)" value={formData.toDetail} onChange={e => setFormData({...formData, toDetail: e.target.value})} className="w-full p-4 rounded-xl border border-gray-200 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none" />
-                        <label className="flex items-center mt-4 cursor-pointer group w-fit">
-                            <input type="checkbox" checked={formData.hasElevatorTo} onChange={e => setFormData({...formData, hasElevatorTo: e.target.checked})} className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer" />
-                            <span className="ml-3 text-sm text-slate-600 group-hover:text-slate-900 font-bold">도착지에 엘리베이터가 있습니다</span>
-                        </label>
+                        
+                        <div className="mt-4 flex flex-col space-y-2">
+                            <label className="flex items-center cursor-pointer group w-fit">
+                                <input type="checkbox" checked={formData.hasElevatorTo} onChange={e => setFormData({...formData, hasElevatorTo: e.target.checked})} className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer" />
+                                <span className="ml-3 text-sm text-slate-600 group-hover:text-slate-900 font-bold">엘리베이터 사용 가능</span>
+                            </label>
+                            <label className="flex items-center cursor-pointer group w-fit">
+                                <input type="checkbox" checked={formData.hasLadderTo} onChange={e => setFormData({...formData, hasLadderTo: e.target.checked})} className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer" />
+                                <span className="ml-3 text-sm text-slate-600 group-hover:text-slate-900 font-bold">사다리차 사용 가능</span>
+                            </label>
+                        </div>
                     </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -729,9 +805,24 @@ const App = () => {
                     </div>
                 </div>
 
-                <div>
+                <div className="mb-6">
                     <label className="block text-sm font-bold text-slate-700 mb-2">기타 사항 (특수 화물, 잔짐 등)</label>
                     <textarea placeholder="피아노, 안마의자 등 특수 화물이 있거나 기타 요청사항을 상세히 적어주세요." className="w-full p-5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white h-32 resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none leading-relaxed" onChange={e => setFormData({...formData, extraItems: e.target.value})} />
+                </div>
+
+                {/* 파일 업로드 폼 추가 */}
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
+                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center">
+                        <Camera className="w-4 h-4 mr-1.5 text-slate-500"/> 현장 사진/영상 첨부 (선택)
+                    </label>
+                    <input 
+                        type="file" 
+                        multiple 
+                        accept="image/*,video/*"
+                        onChange={(e) => setFormData({...formData, mediaFiles: Array.from(e.target.files)})}
+                        className="w-full p-3 rounded-xl border border-gray-200 bg-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer text-sm text-slate-600 transition-all" 
+                    />
+                    <p className="text-xs text-slate-400 mt-3 font-medium">* 견적 산출에 도움이 되는 짐 사진이나 집 내부 환경을 첨부해주세요.</p>
                 </div>
             </section>
 
@@ -781,32 +872,13 @@ const App = () => {
   const DetailView = () => {
     if (!selectedReq) return null;
 
-    const forceClose = async () => {
-      if(!window.confirm("정말 이 견적을 강제 마감하시겠습니까?")) return;
-      try {
-        const { error } = await supabase.from('requests').update({ status: 'closed' }).eq('id', selectedReq.id);
-        if(error) throw error;
-        alert("입찰 마감 처리 완료!");
-        await fetchRequests();
-        setView('home');
-      } catch (error) {
-        alert("오류 발생: " + error.message);
-      }
-    };
+    // 파트너 본인이 낙찰받은 오더인지 판별
+    const isPartnerWinner = role === 'partner' && selectedReq.status === 'awarded' && selectedReq.winner_code === currentPartner?.code;
 
-    const deleteOrder = async () => {
-        if(!window.confirm("이 오더를 완전히 삭제하시겠습니까?\n삭제 후에는 다시 복구할 수 없습니다.")) return;
-        try {
-            // bids 테이블 외래키 설정(CASCADE)에 따라 관련 견적도 같이 삭제됨을 가정합니다.
-            const { error } = await supabase.from('requests').delete().eq('id', selectedReq.id);
-            if(error) throw error;
-            alert("성공적으로 삭제되었습니다.");
-            await fetchRequests();
-            setView('home');
-        } catch (error) {
-            alert("삭제 중 오류 발생: " + error.message);
-        }
-    };
+    // 상세 주소 블라인드 로직 (고객/관리자이거나, 낙찰받은 파트너면 블라인드 해제)
+    const canSeeFullAddress = role === 'admin' || role === 'customer' || isPartnerWinner;
+    const renderFromAddress = canSeeFullAddress ? selectedReq.from_address : selectedReq.from_address.split(' ').slice(0, 2).join(' ') + ' OOO';
+    const renderToAddress = canSeeFullAddress ? selectedReq.to_address : selectedReq.to_address.split(' ').slice(0, 2).join(' ') + ' OOO';
 
     return (
       <div className="max-w-6xl mx-auto py-10 px-4 sm:px-6 animate-in fade-in">
@@ -831,14 +903,25 @@ const App = () => {
                         <ClipboardList className="w-5 h-5 mr-2 text-blue-600"/> 이사 상세 정보
                     </h3>
                     
-                    {(role === 'admin' || role === 'customer') && (
-                        <div className={`${role === 'admin' ? 'bg-red-50 border-red-100' : 'bg-blue-50 border-blue-100'} p-5 rounded-2xl border mb-8`}>
-                            <h4 className={`font-bold ${role === 'admin' ? 'text-red-700' : 'text-blue-800'} flex items-center mb-3`}>
-                                <User className="w-4 h-4 mr-1.5"/> 신청자 정보
-                            </h4>
-                            <div className={`space-y-2 bg-white p-3 rounded-xl border ${role === 'admin' ? 'border-red-100/50' : 'border-blue-100/50'}`}>
-                                <p className="text-sm text-slate-800"><span className={`font-bold ${role === 'admin' ? 'text-red-900' : 'text-blue-900'} mr-2 w-12 inline-block`}>이름</span> {selectedReq.customer_name}</p>
-                                <p className="text-sm text-slate-800 font-mono"><span className={`font-bold ${role === 'admin' ? 'text-red-900' : 'text-blue-900'} mr-2 w-12 inline-block font-sans`}>연락처</span> {selectedReq.phone}</p>
+                    {/* 정보 공개 영역 (관리자, 고객 본인, 혹은 낙찰받은 파트너) */}
+                    {canSeeFullAddress && (
+                        <div className={`${role === 'admin' ? 'bg-red-50 border-red-100' : isPartnerWinner ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-100'} p-5 rounded-2xl border mb-8 animate-in fade-in zoom-in-95`}>
+                            {isPartnerWinner ? (
+                                <>
+                                    <h4 className="font-black text-green-800 flex items-center mb-3 text-lg">
+                                        🎉 축하합니다! 낙찰된 오더입니다.
+                                    </h4>
+                                    <p className="text-sm text-green-700 mb-4 font-bold">고객님과 연락하여 이사 일정을 확정해주세요.</p>
+                                </>
+                            ) : (
+                                <h4 className={`font-bold ${role === 'admin' ? 'text-red-700' : 'text-blue-800'} flex items-center mb-3`}>
+                                    <User className="w-4 h-4 mr-1.5"/> 신청자 정보
+                                </h4>
+                            )}
+                            
+                            <div className={`space-y-2 bg-white p-4 rounded-xl border ${role === 'admin' ? 'border-red-100/50' : isPartnerWinner ? 'border-green-100/50 shadow-sm' : 'border-blue-100/50'}`}>
+                                <p className="text-sm text-slate-800"><span className={`font-bold ${role === 'admin' ? 'text-red-900' : isPartnerWinner ? 'text-green-900' : 'text-blue-900'} mr-2 w-12 inline-block`}>이름</span> {selectedReq.customer_name}</p>
+                                <p className="text-sm text-slate-800 font-mono"><span className={`font-bold ${role === 'admin' ? 'text-red-900' : isPartnerWinner ? 'text-green-900' : 'text-blue-900'} mr-2 w-12 inline-block font-sans`}>연락처</span> {selectedReq.phone}</p>
                             </div>
                         </div>
                     )}
@@ -849,25 +932,35 @@ const App = () => {
                             <div className="absolute left-0 top-1.5 w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center border-2 border-white shadow-sm z-10">
                                 <div className="w-2 h-2 rounded-full bg-blue-600"></div>
                             </div>
-                            <p className="text-xs text-blue-600 font-bold mb-1">출발지 {role === 'partner' && '(동까지 표시)'}</p>
-                            <p className={`font-bold text-slate-800 break-keep leading-relaxed ${role === 'partner' ? 'text-lg' : 'text-sm'}`}>
-                                {role === 'partner' ? selectedReq.from_address.split(' ').slice(0, 2).join(' ') + ' OOO' : selectedReq.from_address}
+                            <p className="text-xs text-blue-600 font-bold mb-1">출발지 {!canSeeFullAddress && '(동까지 표시)'}</p>
+                            <p className={`font-bold text-slate-800 break-keep leading-relaxed ${!canSeeFullAddress ? 'text-lg' : 'text-sm'}`}>
+                                {renderFromAddress}
                             </p>
-                            <span className="inline-block mt-2 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
-                                {selectedReq.has_elevator_from ? '엘리베이터 사용 가능' : '엘리베이터 없음 (계단)'}
-                            </span>
+                            <div className="flex space-x-2 mt-2">
+                                <span className="inline-block text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                                    엘리베이터: {selectedReq.has_elevator_from ? 'O' : 'X'}
+                                </span>
+                                <span className="inline-block text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                                    사다리차: {selectedReq.has_ladder_from ? 'O' : 'X'}
+                                </span>
+                            </div>
                         </div>
                         <div className="relative pl-6">
                             <div className="absolute left-0 top-1.5 w-5 h-5 rounded-full bg-red-100 flex items-center justify-center border-2 border-white shadow-sm z-10">
                                 <div className="w-2 h-2 rounded-full bg-red-500"></div>
                             </div>
-                            <p className="text-xs text-red-500 font-bold mb-1">도착지 {role === 'partner' && '(동까지 표시)'}</p>
-                            <p className={`font-bold text-slate-800 break-keep leading-relaxed ${role === 'partner' ? 'text-lg' : 'text-sm'}`}>
-                                {role === 'partner' ? selectedReq.to_address.split(' ').slice(0, 2).join(' ') + ' OOO' : selectedReq.to_address}
+                            <p className="text-xs text-red-500 font-bold mb-1">도착지 {!canSeeFullAddress && '(동까지 표시)'}</p>
+                            <p className={`font-bold text-slate-800 break-keep leading-relaxed ${!canSeeFullAddress ? 'text-lg' : 'text-sm'}`}>
+                                {renderToAddress}
                             </p>
-                            <span className="inline-block mt-2 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
-                                {selectedReq.has_elevator_to ? '엘리베이터 사용 가능' : '엘리베이터 없음 (계단)'}
-                            </span>
+                            <div className="flex space-x-2 mt-2">
+                                <span className="inline-block text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                                    엘리베이터: {selectedReq.has_elevator_to ? 'O' : 'X'}
+                                </span>
+                                <span className="inline-block text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                                    사다리차: {selectedReq.has_ladder_to ? 'O' : 'X'}
+                                </span>
+                            </div>
                         </div>
                     </div>
 
@@ -908,6 +1001,10 @@ const App = () => {
                             <span className="inline-flex items-center text-sm font-bold text-blue-700 bg-blue-50 border border-blue-100 px-4 py-2 rounded-xl">
                                 <span className="w-2.5 h-2.5 rounded-full bg-blue-500 mr-2 animate-pulse"></span>실시간 업데이트 중
                             </span>
+                        ) : selectedReq.status === 'awarded' ? (
+                            <span className="inline-flex items-center text-sm font-bold text-pink-700 bg-pink-100 border border-pink-200 px-4 py-2 rounded-xl">
+                                <CheckCircle2 className="w-4 h-4 mr-1.5"/> 낙찰 완료
+                            </span>
                         ) : (
                             <span className="inline-flex items-center text-sm font-bold text-gray-600 bg-gray-100 border border-gray-200 px-4 py-2 rounded-xl">
                                 <CheckCircle2 className="w-4 h-4 mr-1.5"/> 최종 마감됨
@@ -927,18 +1024,21 @@ const App = () => {
                         <div className="space-y-4 flex-grow">
                             {selectedReq.bids.sort((a,b)=>a.price - b.price).map((bid, i) => {
                                 const isMyBid = role === 'partner' && bid.partner_code === currentPartner?.code;
+                                const isThisBidWinner = selectedReq.status === 'awarded' && selectedReq.winner_code === bid.partner_code;
+
                                 return (
-                                <div key={bid.id} className={`p-6 sm:p-8 rounded-2xl border transition-all ${i===0 && !isMyBid ? 'border-blue-500 bg-blue-50/30 shadow-md shadow-blue-500/10 scale-[1.01]' : isMyBid ? 'border-slate-800 bg-slate-50 shadow-md' : 'border-gray-200 bg-white hover:border-blue-300'}`}>
+                                <div key={bid.id} className={`p-6 sm:p-8 rounded-2xl border transition-all ${isThisBidWinner ? 'border-pink-500 bg-pink-50/30 shadow-md shadow-pink-500/10 scale-[1.02]' : i===0 && !isMyBid ? 'border-blue-500 bg-blue-50/30 shadow-md shadow-blue-500/10' : isMyBid ? 'border-slate-800 bg-slate-50 shadow-md' : 'border-gray-200 bg-white hover:border-blue-300'}`}>
                                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
                                         <div className="flex items-center space-x-5">
-                                            <div className={`w-16 h-16 rounded-full flex items-center justify-center border-2 ${i===0 && !isMyBid ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : isMyBid ? 'bg-slate-800 text-white border-slate-900' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+                                            <div className={`w-16 h-16 rounded-full flex items-center justify-center border-2 ${isThisBidWinner ? 'bg-pink-600 text-white border-pink-700 shadow-inner' : i===0 && !isMyBid ? 'bg-blue-600 text-white border-blue-700 shadow-inner' : isMyBid ? 'bg-slate-800 text-white border-slate-900' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
                                                 <Truck className="w-7 h-7" />
                                             </div>
                                             <div>
                                                 <div className="flex items-center space-x-3 mb-1.5">
                                                     <h4 className="font-bold text-slate-900 text-xl">{bid.partner_name}</h4>
-                                                    {i === 0 && <span className="bg-blue-600 text-white text-xs font-bold px-2.5 py-1 rounded-md shadow-sm">최저가 제안</span>}
-                                                    {isMyBid && <span className="bg-slate-800 text-white text-xs font-bold px-2.5 py-1 rounded-md shadow-sm">내 견적</span>}
+                                                    {isThisBidWinner && <span className="bg-pink-600 text-white text-xs font-bold px-2.5 py-1 rounded-md shadow-sm">최종 낙찰업체</span>}
+                                                    {i === 0 && !isThisBidWinner && <span className="bg-blue-600 text-white text-xs font-bold px-2.5 py-1 rounded-md shadow-sm">최저가 제안</span>}
+                                                    {isMyBid && !isThisBidWinner && <span className="bg-slate-800 text-white text-xs font-bold px-2.5 py-1 rounded-md shadow-sm">내 견적</span>}
                                                 </div>
                                                 {bid.edit_count > 0 ? (
                                                     <span className="inline-flex items-center text-xs text-orange-600 font-bold bg-orange-50 px-2 py-0.5 rounded-md border border-orange-100"><AlertCircle className="w-3 h-3 mr-1"/> 단가 수정됨</span>
@@ -949,33 +1049,20 @@ const App = () => {
                                         </div>
                                         <div className="text-right bg-white p-5 rounded-2xl border border-gray-100 sm:border-none sm:bg-transparent sm:p-0">
                                             <p className="text-sm text-slate-500 font-bold mb-1">제안 금액</p>
-                                            <p className={`text-3xl font-black tracking-tight ${i===0 && !isMyBid ? 'text-blue-600' : isMyBid ? 'text-slate-800' : 'text-slate-800'}`}>
+                                            <p className={`text-3xl font-black tracking-tight ${isThisBidWinner ? 'text-pink-600' : i===0 && !isMyBid ? 'text-blue-600' : isMyBid ? 'text-slate-800' : 'text-slate-800'}`}>
                                                 {bid.price.toLocaleString()}<span className="text-lg font-bold ml-1 text-slate-600">원</span>
                                             </p>
                                         </div>
                                     </div>
+                                    
+                                    {/* 고객 권한: 입찰 중일 때 낙찰하기 버튼 표시 */}
+                                    {role === 'customer' && selectedReq.status === 'bidding' && (
+                                        <button onClick={() => handleAcceptBid(selectedReq.id, bid.partner_code, bid.partner_name, bid.price)} className="mt-6 w-full bg-blue-600 text-white text-lg font-bold py-4 rounded-xl hover:bg-blue-700 transition-colors shadow-sm">
+                                            이 업체로 낙찰하기
+                                        </button>
+                                    )}
                                 </div>
                             )})}
-                        </div>
-                    )}
-
-                    {role === 'admin' && (
-                        <div className="mt-10 pt-6 border-t border-gray-100 grid grid-cols-2 gap-4">
-                            {selectedReq.status === 'bidding' ? (
-                                <button onClick={forceClose} className="w-full bg-orange-50 hover:bg-orange-100 text-orange-600 border border-orange-200 font-bold py-5 rounded-2xl transition-colors flex justify-center items-center text-lg">
-                                    <Lock className="w-5 h-5 mr-2" />
-                                    입찰 강제 마감
-                                </button>
-                            ) : (
-                                <div className="w-full bg-gray-50 text-gray-400 border border-gray-200 font-bold py-5 rounded-2xl flex justify-center items-center text-lg cursor-not-allowed">
-                                    <CheckCircle2 className="w-5 h-5 mr-2" /> 이미 마감된 오더입니다
-                                </div>
-                            )}
-                            
-                            <button onClick={deleteOrder} className="w-full bg-white hover:bg-red-50 text-red-600 border border-red-200 font-bold py-5 rounded-2xl transition-colors flex justify-center items-center text-lg">
-                                <Trash2 className="w-5 h-5 mr-2" />
-                                오더 영구 삭제
-                            </button>
                         </div>
                     )}
                 </div>
@@ -1064,9 +1151,14 @@ const App = () => {
                         </div>
                         <p className="text-xs text-blue-600 font-bold mb-1">출발지 (동까지 표시)</p>
                         <p className="text-lg font-black text-slate-800 break-keep">{hiddenFrom}</p>
-                        <span className="inline-block mt-2 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
-                            {selectedReq.has_elevator_from ? '엘리베이터 O' : '엘리베이터 X'}
-                        </span>
+                        <div className="flex space-x-2 mt-2">
+                            <span className="inline-block text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                                엘리베이터: {selectedReq.has_elevator_from ? 'O' : 'X'}
+                            </span>
+                            <span className="inline-block text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                                사다리차: {selectedReq.has_ladder_from ? 'O' : 'X'}
+                            </span>
+                        </div>
                     </div>
                     <div className="relative pl-6">
                         <div className="absolute left-0 top-1.5 w-5 h-5 rounded-full bg-red-100 flex items-center justify-center border-2 border-white shadow-sm z-10">
@@ -1074,9 +1166,14 @@ const App = () => {
                         </div>
                         <p className="text-xs text-red-500 font-bold mb-1">도착지 (동까지 표시)</p>
                         <p className="text-lg font-black text-slate-800 break-keep">{hiddenTo}</p>
-                        <span className="inline-block mt-2 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
-                            {selectedReq.has_elevator_to ? '엘리베이터 O' : '엘리베이터 X'}
-                        </span>
+                        <div className="flex space-x-2 mt-2">
+                            <span className="inline-block text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                                엘리베이터: {selectedReq.has_elevator_to ? 'O' : 'X'}
+                            </span>
+                            <span className="inline-block text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                                사다리차: {selectedReq.has_ladder_to ? 'O' : 'X'}
+                            </span>
+                        </div>
                     </div>
                 </div>
 
